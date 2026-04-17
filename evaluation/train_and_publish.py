@@ -19,6 +19,7 @@ Usage:
 import argparse
 import json
 import os
+import random
 
 import numpy as np
 import tinker
@@ -27,54 +28,22 @@ from tinker_cookbook import model_info, renderers
 from tinker_cookbook.supervised.data import conversation_to_datum
 from tinker_cookbook.tokenizer_utils import get_tokenizer
 
-MODEL = "meta-llama/Llama-3.2-3B"
+#MODEL = "meta-llama/Llama-3.2-3B"
 # MODEL = "meta-llama/Llama-3.2-1B"    # Smaller, faster for development
-# MODEL = "meta-llama/Llama-3.1-8B"    # Recommended for final submission
+MODEL = "meta-llama/Llama-3.1-8B"    # Recommended for final submission
 
 EVAL_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_PATH = "final_training_data.json"
 
-# TODO: TOY DATA, replace with your own training data
-DEMO_CONVERSATIONS = [
-    [
-        {"role": "user", "content": "What is 15 + 27?"},
-        {"role": "assistant", "content": "15 + 27 = 42"},
-    ],
-    [
-        {"role": "user", "content": "What is the capital of France?"},
-        {"role": "assistant", "content": "The capital of France is Paris."},
-    ],
-    [
-        {"role": "user", "content": "Write a Python function that returns the sum of two numbers."},
-        {"role": "assistant", "content": "def add(a, b):\n    return a + b"},
-    ],
-    [
-        {"role": "user", "content": "What is 8 * 7?"},
-        {"role": "assistant", "content": "8 * 7 = 56"},
-    ],
-    [
-        {"role": "user", "content": "Translate 'hello' to Spanish."},
-        {"role": "assistant", "content": "Hola"},
-    ],
-    [
-        {"role": "user", "content": "What is the square root of 144?"},
-        {"role": "assistant", "content": "The square root of 144 is 12."},
-    ],
-    [
-        {"role": "user", "content": "Write a Python function to check if a number is even."},
-        {"role": "assistant", "content": "def is_even(n):\n    return n % 2 == 0"},
-    ],
-    [
-        {"role": "user", "content": "List the first 5 prime numbers."},
-        {"role": "assistant", "content": "The first 5 prime numbers are: 2, 3, 5, 7, 11."},
-    ],
-]
+
+
 
 
 def main():
     parser = argparse.ArgumentParser(description="Train, save, and publish a checkpoint")
-    parser.add_argument("--num_steps", type=int, default=10, help="Number of training steps")
+    parser.add_argument("--num_steps", type=int, default=500, help="Number of training steps")
     parser.add_argument("--batch_size", type=int, default=4, help="Batch size")
-    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
+    parser.add_argument("--lr", type=float, default=2e-5, help="Learning rate")
     parser.add_argument("--rank", type=int, default=32, help="LoRA rank")
     parser.add_argument("--checkpoint_name", type=str, default="demo", help="Checkpoint name")
     parser.add_argument("--no_publish", action="store_true", help="Skip publishing")
@@ -87,15 +56,35 @@ def main():
     renderer = renderers.get_renderer(renderer_name, tokenizer)
     print(f"Renderer: {renderer_name}")
 
-    # Prepare training data
-    print("Preparing training data...")
+   # 1. read data
+    print(f"📦 Loading real training data from {DATA_PATH}...")
+    if not os.path.exists(DATA_PATH):
+        raise FileNotFoundError(f"No data {DATA_PATH}！")
+        
+    with open(DATA_PATH, "r", encoding="utf-8") as f:
+        real_conversations = json.load(f)
+        
+    # shuffle again
+    random.seed(42)
+    random.shuffle(real_conversations)
+    print(f"Loaded {len(real_conversations)} mixed tasks.")
+
+    # 2. tinker
+    print("Formatting data for Tinker...")
     all_data = []
-    for convo in DEMO_CONVERSATIONS:
-        datum = conversation_to_datum(
-            convo, renderer, max_length=512, train_on_what=renderers.TrainOnWhat.ALL_ASSISTANT_MESSAGES
-        )
-        all_data.append(datum)
-    print(f"  {len(all_data)} training examples prepared")
+    for convo in real_conversations:
+        try:
+            datum = conversation_to_datum(
+                convo, 
+                renderer, 
+                max_length=1024, # enlarge window size
+                train_on_what=renderers.TrainOnWhat.ALL_ASSISTANT_MESSAGES
+            )
+            all_data.append(datum)
+        except Exception as e:
+            continue
+            
+    print(f"{len(all_data)} valid training examples prepared.")
 
     # Create training client
     print(f"Creating LoRA training client (rank={args.rank})...")
